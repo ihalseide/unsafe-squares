@@ -1,6 +1,11 @@
 -- Bomp-Scanner, a game like minesweeper
+-- Written for Love2d
 
 
+require "queue"
+
+
+CHEATS = true
 theFieldTileSize = 32
 
 	
@@ -24,7 +29,7 @@ function love.load()
     ['8'] = newGridQuad(3, 3, sheet),
 	}
 	
-	theShowQueue = {}
+	theShowQueue = List.new()
   showTimer = 0
   
   gameOver = false
@@ -39,12 +44,12 @@ end
 
 
 function love.keypressed(key, scancode)
-	if key == "r" then
+	if CHEATS and key == "r" then
 		love.load()
-	elseif key == "f5" then
+	elseif CHEATS and key == "f5" then
 		-- Quick reload for development
 		love.event.quit('restart')
-	elseif key == "escape" then
+	elseif CHEATS and key == "escape" then
 		-- Quick quit for development
 		love.event.quit()
 	end
@@ -58,7 +63,7 @@ function love.mousepressed(x, y, button)
 	if isOnField(row, col, theField) then
     if button == 1 then
       if not getFlag(theField, row, col) then
-        theShowQueue[#theShowQueue + 1] = {row, col}
+        List.pushright(theShowQueue, {row, col})
       end
     else
       toggleFlag(theField, row, col)
@@ -69,9 +74,9 @@ end
 
 function love.update(dt)
   showTimer = showTimer + dt
-  if showTimer >= 0.01 then
+  if true then --showTimer >= 0 then
     showTimer = 0
-    if #theShowQueue > 0 then
+    if not List.empty(theShowQueue) then
       stepShowQueue(theField, theShowQueue)
     elseif isGameWon() then
       gameWin = true
@@ -183,7 +188,6 @@ end
 -- </Array2>
 
 
-
 function getFlag(aField, row, col)
   return aField.flags[{row,col}]
 end
@@ -207,7 +211,7 @@ end
 
 -- Expects showQueue to be a list of {row,col} pairs
 function stepShowQueue(aField, showQueue)
-	local pos = popList(showQueue)
+	local pos = List.popleft(showQueue)
   assert(pos)
   
   -- Do not process an already shown tile again
@@ -234,7 +238,7 @@ function stepShowQueue(aField, showQueue)
 		local nrow, ncol = row + dpos[1], col + dpos[2]
     local npos = {nrow, ncol}
     if isOnField(nrow, ncol, aField) and (not theField.revealed[npos]) and not containsPos(showQueue, npos) then
-      showQueue[#showQueue + 1] = npos
+      List.pushright(showQueue, npos)
     end
 	end
 end
@@ -266,7 +270,9 @@ end
 
 
 function showTile(aField, row, col)
-	aField.revealed[{row,col}] = true
+  local pos = {row,col}
+	aField.revealed[pos] = true
+  aField.flags[pos] = nil
 end
 
 
