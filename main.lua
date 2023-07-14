@@ -10,7 +10,7 @@ theFieldTileSize = 32
 
 	
 function love.load()
-	love.math.setRandomSeed(1)
+	-- love.math.setRandomSeed(1)
 
 	sheet = love.graphics.newImage("sheet.png")
 	
@@ -19,6 +19,8 @@ function love.load()
 		known = newGridQuad(1, 0, sheet),
 		mine = newGridQuad(0, 1, sheet),
     flag = newGridQuad(1, 1, sheet),
+    fatal = newGridQuad(2, 1, sheet),
+    select = newGridQuad(2, 0, sheet),
     ['1'] = newGridQuad(0, 2, sheet),
     ['2'] = newGridQuad(1, 2, sheet),
     ['3'] = newGridQuad(2, 2, sheet),
@@ -30,14 +32,16 @@ function love.load()
 	}
   
   sounds = {
-    click = love.audio.newSource("click.wav", "static"),
-    bang = love.audio.newSource("bang.wav", "static"),
+    click = love.audio.newSource('click.wav', 'static'),
+    bang = love.audio.newSource('bang.wav', 'static'),
+    win = love.audio.newSource('win.wav', 'static'),
   }
   
-  theConfigBombCount = 10
+  theConfigBombCount = 18
 	
 	theShowQueue = Queue.new()
   
+  shouldCheckWin = false
   gameStarted = false
   gameOver = false
   gameWin = false
@@ -81,8 +85,9 @@ function love.mousereleased(x, y, button)
 	if isOnField(row, col, theField) and col == thePressedTileCol and row == thePressedTileRow then
     if button == 1 then
       -- Reveal
+      shouldCheckWin = true
       if not gameStarted then
-        startGame(theConfigBombCount)
+        startGame(theConfigBombCount, row, col)
       end
       if not getFlag(theField, row, col) then
         Queue.put(theShowQueue, {row, col})
@@ -101,45 +106,34 @@ end
 function love.update(dt)
   if gameStarted then
     processTheShowQueue(12)
-    if not gameOver and not gameWin and isGameWon() then
-      gameWin = true
+    if checkWin() then
+      setGameWin()
     end
   end
 end
 
 
 function love.draw()
+  love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
   if gameOver then
-    love.graphics.setBackgroundColor(0.7, 0, 0)
     drawField(theField)
     love.graphics.setColor(1,1,1)
     love.graphics.print("GAME OVER", 100, 100)
   elseif gameWin then
-    love.graphics.setBackgroundColor(0, 0.7, 0)
     drawField(theField)
     love.graphics.setColor(1,1,1)
     love.graphics.print("YOU WIN", 100, 100)
   else
-    love.graphics.setBackgroundColor(0.1, 0.1, 0.5)
     drawField(theField)
   end
-	--[[
+
 	local mx, my = love.mouse.getPosition()
 	local tx, ty = screenToTile(mx, my)
 	if isOnField(tx, ty, theField) then
 		local x, y = tileToScreen(tx, ty)
-		local dy = 15
-		local coord = {ty, tx}
-		love.graphics.rectangle("line", x, y, theFieldTileSize, theFieldTileSize)
-		mx, my = mx + 20, my + dy
-		love.graphics.print("tx: "..tx.." ty: "..ty, mx, my)
-		my = my + dy
-		love.graphics.print("bombs[]: "..(theField.bombs[coord] or 'nil'), mx, my)
-		my = my + dy
-		love.graphics.print("numbers[]: "..(theField.numbers[coord] or 'nil'), mx, my)
-		my = my + dy
+		love.graphics.draw(sheet, tiles.select, x, y)
 	end
-	--]]
+  
   --[[
   local lineY = 10
   for k, v in pairs(theShowQueue) do
@@ -155,9 +149,8 @@ function love.draw()
     end
   end
   --]]
-  if debug then
-    love.graphics.print("Current FPS: "..love.timer.getFPS(), 10, 10)
-  end
+
+  love.graphics.print("Current FPS: "..love.timer.getFPS(), 10, 10)
 end
 
 
@@ -221,6 +214,17 @@ end
 -- </Array2>
 
 
+function checkWin()
+  if shouldCheckWin then
+    shouldCheckWin = false
+    if not gameOver and isGameWon() then
+      return true
+    end
+  end
+  return false
+end
+
+
 function processTheShowQueue(steps)
   for i = 1, steps do
     if Queue.isEmpty(theShowQueue) then
@@ -272,7 +276,7 @@ function stepShowQueue(aField, showQueue)
   
   -- A bomb has been revealed, so the game is over
   if theField.bombs[pos] then
-    setGameOver()
+    setGameOver(row, col)
     return
   end
 	
@@ -299,17 +303,27 @@ function showAllBombs(aField)
 end
 
 
-function setGameOver()
+function setGameOver(fatalRow, fatalCol)
   gameOver = true
   showAllBombs(theField)
+  theField.fatalRow = fatalRow
+  theField.fatalCol = fatalCol
   sounds.click:stop()
   sounds.bang:play()
 end
 
 
-function startGame(bombCount)
+function setGameWin()
+  gameWin = true
+  showAllBombs(theField)
+  sounds.click:stop()
+  sounds.win:play()
+end
+
+
+function startGame(bombCount, safeRow, safeCol)
   gameStarted = true
-  addBombsExcept(theField, bombCount, row, col)
+  addBombsExcept(theField, bombCount, safeRow, safeCol)
 end
 
 
@@ -404,9 +418,17 @@ end
 
 function drawFieldTile(aField, r, c, x, y)
   local coord = {r, c}
+  
   if aField.revealed[coord] then
     -- Revealed tile
-    love.graphics.draw(sheet, tiles.known, x, y)
+    --Choose background
+    if aField.fatalRow == r and aField.fatalCol == c then
+      love.graphics.draw(sheet, tiles.fatal, x, y)
+    else
+      love.graphics.draw(sheet, tiles.known, x, y)
+    end
+    
+    -- Choose foreground
     if aField.bombs[coord] then
       love.graphics.draw(sheet, tiles.mine, x, y)
     else
@@ -416,6 +438,7 @@ function drawFieldTile(aField, r, c, x, y)
         love.graphics.draw(sheet, tiles[tostring(n)], x, y)
       end
     end
+    
   else
     -- Unrevealed tile
     love.graphics.draw(sheet, tiles.unknown, x, y)
@@ -447,27 +470,17 @@ function addBombsExcept(aField, count, safeRow, safeCol)
 	-- Returns bomb spot upon success
 	local function addBomb()
 		local r, c
-		local loopCount = 0
 		repeat
 			r = love.math.random(aField.rows)
 			c = love.math.random(aField.cols)
-		until (r ~= safeRow or c ~= safeCol) and ((aField.bombs[{r,c}] ~= 'mine') or (loopCount > fieldSpots))
-		
-		if loopCount > fieldSpots then
-			return
-		end
-		
-		local k = {r,c}
-		aField.bombs[k] = 'mine'
-		return k
+		until (r ~= safeRow or c ~= safeCol) and (aField.bombs[{r,c}] ~= 'mine')
+		aField.bombs[{r,c}] = 'mine'
 	end
 	
   aField.bombs = Array2.new{}
   
 	for i = 1, count do
-		if not addBomb() then
-			break
-		end
+		addBomb()
 	end
   
   addFieldNumbers(aField)
@@ -475,17 +488,9 @@ end
 
 
 function isGameWon()
-  for k, _ in pairs(theField.bombs) do
-    if not theField.flags[{Array2.unpackKey(k)}] then
-      return false
-    end
-  end
-  
-  for k, _ in pairs(theField.flags) do
-    if not theField.bombs[{Array2.unpackKey(k)}] then
-      return false
-    end
-  end
-  
-  return true
+  if gameOver then return false end
+  local totalCount = theField.rows * theField.cols
+  local revealCount = keyCount(theField.revealed)
+  local bombCount = keyCount(theField.bombs)
+  return totalCount == revealCount + bombCount
 end
