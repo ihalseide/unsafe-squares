@@ -20,7 +20,9 @@ function love.load()
 		mine = newGridQuad(0, 1, sheet),
     flag = newGridQuad(1, 1, sheet),
     fatal = newGridQuad(2, 1, sheet),
-    select = newGridQuad(2, 0, sheet),
+    select1 = newGridQuad(2, 0, sheet),
+    select2 = newGridQuad(3, 0, sheet),
+    border = newGridQuad(3, 1, sheet),
     ['1'] = newGridQuad(0, 2, sheet),
     ['2'] = newGridQuad(1, 2, sheet),
     ['3'] = newGridQuad(2, 2, sheet),
@@ -31,13 +33,30 @@ function love.load()
     ['8'] = newGridQuad(3, 3, sheet),
 	}
   
+  digits = {
+    [0] = love.graphics.newQuad(0, 128, 12, 17, sheet),
+    [1] = love.graphics.newQuad(12, 128, 9, 17, sheet),
+    [2] = love.graphics.newQuad(23, 128, 11, 17, sheet),
+    [3] = love.graphics.newQuad(34, 128, 9, 17, sheet),
+    [4] = love.graphics.newQuad(45, 128, 13, 17, sheet),
+    [5] = love.graphics.newQuad(58, 128, 13, 16, sheet),
+    [6] = love.graphics.newQuad(71, 128, 12, 17, sheet),
+    [7] = love.graphics.newQuad(83, 128, 12, 16, sheet),
+    [8] = love.graphics.newQuad(95, 128, 13, 16, sheet),
+    [9] = love.graphics.newQuad(108, 128, 11, 18, sheet),
+    [':'] = love.graphics.newQuad(120, 128, 6, 16, sheet),
+  }
+  
   sounds = {
     click = love.audio.newSource('click.wav', 'static'),
     bang = love.audio.newSource('bang.wav', 'static'),
     win = love.audio.newSource('win.wav', 'static'),
   }
   
-  theConfigBombCount = 18
+  theConfigBombCount = 20 --18
+  
+  theShimmerTimer = 0
+  theShimmer = false
 	
 	theShowQueue = Queue.new()
   
@@ -48,9 +67,11 @@ function love.load()
   
   thePressedTileCol, thePressedTileRow = 0, 0
 	
-	theField = makeBlankField(12, 12)
+	theField = makeBlankField(14, 20)
 	
 	theFieldX, theFieldY = getCenterField()
+  
+  startTime = love.timer.getTime()
 end
 
 
@@ -110,29 +131,47 @@ function love.update(dt)
       setGameWin()
     end
   end
+  
+  theShimmerTimer = theShimmerTimer + dt
+  if theShimmerTimer >= 0.4 then
+    theShimmerTimer = 0
+    theShimmer = not theShimmer
+  end
 end
 
 
 function love.draw()
   love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+  
+  drawBorder()
+  drawField(theField)
+  
   if gameOver then
-    drawField(theField)
     love.graphics.setColor(1,1,1)
     love.graphics.print("GAME OVER", 100, 100)
   elseif gameWin then
-    drawField(theField)
     love.graphics.setColor(1,1,1)
     love.graphics.print("YOU WIN", 100, 100)
-  else
-    drawField(theField)
   end
 
-	local mx, my = love.mouse.getPosition()
-	local tx, ty = screenToTile(mx, my)
-	if isOnField(tx, ty, theField) then
-		local x, y = tileToScreen(tx, ty)
-		love.graphics.draw(sheet, tiles.select, x, y)
-	end
+  if not gameOver then
+    local mx, my = love.mouse.getPosition()
+    local tx, ty = screenToTile(mx, my)
+    if isOnField(tx, ty, theField) then
+      local x, y = tileToScreen(tx, ty)
+      if theShimmer then
+        love.graphics.draw(sheet, tiles.select1, x, y)
+      else
+        love.graphics.draw(sheet, tiles.select2, x, y)
+      end
+    end
+  end
+  
+  local x1, y1 = getCenterField()
+  y1 = y1 - theFieldTileSize - 24
+  drawTime(x1 - theFieldTileSize + 1, y1, getPlayTime())
+  local x2 = theFieldX + theFieldTileSize * theField.cols - 16
+  drawBombCount(theConfigBombCount, x2, y1)
   
   --[[
   local lineY = 10
@@ -150,7 +189,7 @@ function love.draw()
   end
   --]]
 
-  love.graphics.print("Current FPS: "..love.timer.getFPS(), 10, 10)
+  love.graphics.print("FPS "..love.timer.getFPS(), 0, 0)
 end
 
 
@@ -212,6 +251,74 @@ Array2.mt.__newindex = function (table, key, value)
 	rawset(table, composedKey, value)
 end
 -- </Array2>
+
+
+function getPlayTime()
+  if gameStarted then
+    if gameOver or gameWien then
+      return endTime - startTime
+    else
+      return math.floor(love.timer.getTime() - startTime)
+    end
+  else
+    return 0
+  end
+end
+
+
+function drawTime(x, y, seconds)
+  assert(seconds >= 0)
+  
+  local m = math.floor(seconds / 60)
+  local s = seconds - m*60
+  
+  local m1 = math.floor(m / 10)
+  local m2 = math.floor(m % 10)
+  
+  local s1 = math.floor(s / 10)
+  local s2 = math.floor(s % 10)
+  
+  drawDigit(m1, x, y)
+  drawDigit(m2, x+12, y)
+  drawDigit(':', x+24, y)
+  drawDigit(s1, x+31, y)
+  drawDigit(s2, x+44, y)
+end
+
+
+function drawBombCount(count, x, y)
+  assert(count < 100)
+  local b1 = math.floor(count / 10)
+  local b2 = count - b1 * 10
+  drawDigit(b1, x, y)
+  drawDigit(b2, x+12, y)
+  love.graphics.draw(sheet, tiles.mine, x+20, y-8)
+end
+
+
+function drawDigit(digit, x, y)
+  local quad = digits[digit]
+  love.graphics.draw(sheet, quad, x, y)
+end
+
+
+function drawBorder()
+  local x, y
+
+  for r = 0, theField.rows + 1 do
+    x, y = tileToScreen(0, r)
+    love.graphics.draw(sheet, tiles.border, x, y)
+    x, y = tileToScreen(theField.cols + 1, r)
+    love.graphics.draw(sheet, tiles.border, x, y)
+  end
+  
+  for c = 1, theField.cols do
+    x, y = tileToScreen(c, 0)
+    love.graphics.draw(sheet, tiles.border, x, y)
+    x, y = tileToScreen(c, theField.rows + 1)
+    love.graphics.draw(sheet, tiles.border, x, y)
+  end
+end
 
 
 function checkWin()
@@ -305,6 +412,7 @@ end
 
 function setGameOver(fatalRow, fatalCol)
   gameOver = true
+  endTime = love.timer.getTime()
   showAllBombs(theField)
   theField.fatalRow = fatalRow
   theField.fatalCol = fatalCol
@@ -315,6 +423,7 @@ end
 
 function setGameWin()
   gameWin = true
+  endTime = love.timer.getTime()
   showAllBombs(theField)
   sounds.click:stop()
   sounds.win:play()
@@ -324,6 +433,7 @@ end
 function startGame(bombCount, safeRow, safeCol)
   gameStarted = true
   addBombsExcept(theField, bombCount, safeRow, safeCol)
+  startTime = love.timer.getTime()
 end
 
 
