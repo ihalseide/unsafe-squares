@@ -2,7 +2,7 @@
 -- Written for Love2d
 
 
-require "queue"
+require "mountain-inh"
 
 
 CHEATS = true
@@ -28,16 +28,23 @@ function love.load()
     ['7'] = newGridQuad(2, 3, sheet),
     ['8'] = newGridQuad(3, 3, sheet),
 	}
-	
-	theShowQueue = List.new()
-  showTimer = 0
   
+  sounds = {
+    click = love.audio.newSource("click.wav", "static"),
+    bang = love.audio.newSource("bang.wav", "static"),
+  }
+  
+  theConfigBombCount = 10
+	
+	theShowQueue = Queue.new()
+  
+  gameStarted = false
   gameOver = false
   gameWin = false
+  
+  thePressedTileCol, thePressedTileRow = 0, 0
 	
 	theField = makeBlankField(12, 12)
-	addBombs(theField, 1)
-	addFieldNumbers(theField)
 	
 	theFieldX, theFieldY = getCenterField()
 end
@@ -52,20 +59,39 @@ function love.keypressed(key, scancode)
 	elseif CHEATS and key == "escape" then
 		-- Quick quit for development
 		love.event.quit()
-	end
+  --[[
+	elseif key == 'space' then
+    if not Queue.isEmpty(theShowQueue) then
+      stepShowQueue(theField, theShowQueue)
+    end
+  --]]
+  end
 end
 
 
 function love.mousepressed(x, y, button)
+  thePressedTileCol, thePressedTileRow = screenToTile(x, y)
+end
+
+
+function love.mousereleased(x, y, button)
   if gameOver or gameWin then return end
   
 	local col, row = screenToTile(x, y)
-	if isOnField(row, col, theField) then
+	if isOnField(row, col, theField) and col == thePressedTileCol and row == thePressedTileRow then
     if button == 1 then
+      -- Reveal
+      if not gameStarted then
+        startGame(theConfigBombCount)
+      end
       if not getFlag(theField, row, col) then
-        List.pushright(theShowQueue, {row, col})
+        Queue.put(theShowQueue, {row, col})
+        if not theField.revealed[{row, col}] then
+          sounds.click:play()
+        end
       end
     else
+      -- Flag
       toggleFlag(theField, row, col)
     end
 	end
@@ -73,12 +99,9 @@ end
 
 
 function love.update(dt)
-  showTimer = showTimer + dt
-  if true then --showTimer >= 0 then
-    showTimer = 0
-    if not List.empty(theShowQueue) then
-      stepShowQueue(theField, theShowQueue)
-    elseif isGameWon() then
+  if gameStarted then
+    processTheShowQueue(12)
+    if not gameOver and not gameWin and isGameWon() then
       gameWin = true
     end
   end
@@ -118,13 +141,23 @@ function love.draw()
 	end
 	--]]
   --[[
-  for i, pos in ipairs(theShowQueue) do
-    local row, col = unpack(pos)
-    love.graphics.print(row..", "..col, 10, 5+i*14)
-    local x, y = tileToScreen(col, row)
-    love.graphics.rectangle("line", x, y, theFieldTileSize, theFieldTileSize)
+  local lineY = 10
+  for k, v in pairs(theShowQueue) do
+    if type(k) == 'number' then
+      local row, col = unpack(v)
+      love.graphics.print(k.." = "..row..", "..col, 10, lineY)
+      local x, y = tileToScreen(col, row)
+      love.graphics.rectangle("line", x, y, theFieldTileSize, theFieldTileSize)
+      lineY = lineY + 14
+    else
+      love.graphics.print(k.." = "..v, 10, lineY)
+      lineY = lineY + 14
+    end
   end
   --]]
+  if debug then
+    love.graphics.print("Current FPS: "..love.timer.getFPS(), 10, 10)
+  end
 end
 
 
@@ -188,6 +221,16 @@ end
 -- </Array2>
 
 
+function processTheShowQueue(steps)
+  for i = 1, steps do
+    if Queue.isEmpty(theShowQueue) then
+      break
+    end
+    stepShowQueue(theField, theShowQueue)
+  end
+end
+
+
 function getFlag(aField, row, col)
   return aField.flags[{row,col}]
 end
@@ -211,11 +254,16 @@ end
 
 -- Expects showQueue to be a list of {row,col} pairs
 function stepShowQueue(aField, showQueue)
-	local pos = List.popleft(showQueue)
+	local pos = Queue.pop(showQueue)
   assert(pos)
   
   -- Do not process an already shown tile again
 	if theField.revealed[pos] then
+		return
+	end
+  
+  -- Do not process a flagged tile
+	if theField.flags[pos] then
 		return
 	end
   
@@ -237,8 +285,8 @@ function stepShowQueue(aField, showQueue)
 	for _, dpos in ipairs({ {1,0}, {-1,0}, {0,1}, {0,-1} }) do
 		local nrow, ncol = row + dpos[1], col + dpos[2]
     local npos = {nrow, ncol}
-    if isOnField(nrow, ncol, aField) and (not theField.revealed[npos]) and not containsPos(showQueue, npos) then
-      List.pushright(showQueue, npos)
+    if isOnField(nrow, ncol, aField) and (not theField.revealed[npos]) and not queueContainsPos(showQueue, npos) then
+      Queue.put(showQueue, npos)
     end
 	end
 end
@@ -254,13 +302,22 @@ end
 function setGameOver()
   gameOver = true
   showAllBombs(theField)
+  sounds.click:stop()
+  sounds.bang:play()
 end
 
 
-function containsPos(list, pos)
+function startGame(bombCount)
+  gameStarted = true
+  addBombsExcept(theField, bombCount, row, col)
+end
+
+
+function queueContainsPos(list, pos)
   assert(type(list) == 'table')
   assert(type(pos) == 'table')
-  for _, val in ipairs(list) do
+  for i = list.first, list.last do
+    local val = list[i]
     if val[1] == pos[1] and val[2] == pos[2] then
       return true
     end
@@ -278,6 +335,8 @@ end
 
 -- Populate the field's numbers with proper values
 function addFieldNumbers(aField)
+  aField.numbers = Array2.new{}
+  
 	-- Iterate the field's bombs
 	for k, v in pairs(aField.bombs) do
 		local centerRow, centerCol = Array2.unpackKey(k)
@@ -380,7 +439,8 @@ function newGridQuad(x, y, img)
 end
 
 
-function addBombs(aField, count)
+-- Add bombs anywhere except at {safeRow, safeCol}
+function addBombsExcept(aField, count, safeRow, safeCol)
 	local fieldSpots = aField.rows * aField.cols
 	assert(count < fieldSpots, "not enough room for adding some bombs")
 	
@@ -391,7 +451,7 @@ function addBombs(aField, count)
 		repeat
 			r = love.math.random(aField.rows)
 			c = love.math.random(aField.cols)
-		until ((aField.bombs[{r,c}] ~= 'mine') or (loopCount > fieldSpots))
+		until (r ~= safeRow or c ~= safeCol) and ((aField.bombs[{r,c}] ~= 'mine') or (loopCount > fieldSpots))
 		
 		if loopCount > fieldSpots then
 			return
@@ -402,11 +462,15 @@ function addBombs(aField, count)
 		return k
 	end
 	
+  aField.bombs = Array2.new{}
+  
 	for i = 1, count do
 		if not addBomb() then
 			break
 		end
 	end
+  
+  addFieldNumbers(aField)
 end
 
 
