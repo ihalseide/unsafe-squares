@@ -53,7 +53,7 @@ function love.load()
     win = love.audio.newSource('win.wav', 'static'),
   }
   
-  theConfigBombCount = 20 --18
+  theConfigBombCount = 20
   
   theShimmerTimer = 0
   theShimmer = false
@@ -126,8 +126,9 @@ end
 
 function love.update(dt)
   if gameStarted then
-    processTheShowQueue(12)
-    if checkWin() then
+    processTheShowQueue(20 + math.floor(1000 * dt))
+    
+    if not gameOver and checkWin() then
       setGameWin()
     end
   end
@@ -148,10 +149,10 @@ function love.draw()
   
   if gameOver then
     love.graphics.setColor(1,1,1)
-    love.graphics.print("GAME OVER", 100, 100)
+    love.graphics.print("GAME OVER", 120, 20)
   elseif gameWin then
     love.graphics.setColor(1,1,1)
-    love.graphics.print("YOU WIN", 100, 100)
+    love.graphics.print("YOU WIN", 120, 20)
   end
 
   if not gameOver then
