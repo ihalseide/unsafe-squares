@@ -1,5 +1,14 @@
 -- Izak's Lua utils
--- Last updated 5:20 PM 7/13/2023
+-- Last updated 6:06 PM 7/13/2023
+
+
+function keyCount(table)
+  local n = 0
+  for _, _ in pairs(table) do
+    n = n + 1
+  end
+  return n
+end
 
 
 -- Return the number "x" clamped between the given minimum and maximum values
