@@ -208,3 +208,41 @@ function Queue:pop()
   
   return value
 end
+
+
+-- Sparse 2D grid
+Sparse2D = {}
+Sparse2D.mt = {}
+
+function Sparse2D.new()
+  return setmetatable({}, Sparse2D.mt)
+end
+
+
+-- Lookup table with a keys being defined as equal if the 2 elements are equal
+-- If the key is not present, fall back on rawget()
+Sparse2D.mt.__index = function(table, key)
+	if type(key) == 'table' then
+    if #key == 2 then
+      local a, b = unpack(key)
+      for k, v in pairs(table) do
+        if k[1] == a and k[2] == b then
+          return v
+        end
+      end
+    end
+    return nil
+  end    
+  return rawget(table, key)
+end
+
+
+-- Check if a table contains a value as a member.
+function member(item, table)
+  for _, val in pairs(table) do
+    if item == val then
+      return true
+    end
+  end
+  return false
+end
