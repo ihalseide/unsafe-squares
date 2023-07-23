@@ -10,8 +10,10 @@ CHEATS = true
 theFieldTileSize = 32
 GAME_STATES = { 'config', 'ready', 'play', 'lose', 'win' }
 MIN_ROWS, MIN_COLS = 9, 9
-MAX_ROWS, MAX_COLS = 16, 23
-  
+MAX_ROWS, MAX_COLS = 15, 23
+MIN_BOMBS = 2
+MENU_WAIT_SECONDS = 3
+
 
 function love.load()
   -- Load sprites/images
@@ -25,6 +27,9 @@ function love.load()
     fatal = newGridQuad(2, 0, sheet),
     border = newGridQuad(3, 0, sheet),
     panel = newGridQuad(1, 1, sheet),
+    col = newGridQuad(0, 5, sheet),
+    row = newGridQuad(1, 5, sheet),
+    check = newGridQuad(2, 5, sheet),
     ['1'] = newGridQuad(0, 2, sheet),
     ['2'] = newGridQuad(1, 2, sheet),
     ['3'] = newGridQuad(2, 2, sheet),
@@ -33,6 +38,8 @@ function love.load()
     ['6'] = newGridQuad(1, 3, sheet),
     ['7'] = newGridQuad(2, 3, sheet),
     ['8'] = newGridQuad(3, 3, sheet),
+    ['+'] = love.graphics.newQuad(0, 145, 16, 15, sheet),
+    ['-'] = love.graphics.newQuad(16, 145, 16, 15, sheet),
   }
   digits = {
     [0] = love.graphics.newQuad(0, 128, 12, 17, sheet),
@@ -40,7 +47,7 @@ function love.load()
     [2] = love.graphics.newQuad(23, 128, 11, 17, sheet),
     [3] = love.graphics.newQuad(34, 128, 9, 17, sheet),
     [4] = love.graphics.newQuad(45, 128, 13, 17, sheet),
-    [5] = love.graphics.newQuad(58, 128, 13, 16, sheet),
+    [5] = love.graphics.newQuad(58, 128, 13, 17, sheet),
     [6] = love.graphics.newQuad(71, 128, 12, 17, sheet),
     [7] = love.graphics.newQuad(83, 128, 12, 16, sheet),
     [8] = love.graphics.newQuad(95, 128, 13, 16, sheet),
@@ -51,7 +58,8 @@ function love.load()
   -- Load sounds
   sounds = {
     click = love.audio.newSource('click.wav', 'static'),
-    bang = love.audio.newSource('bang.wav', 'static'),
+    bang = love.audio.newSource('bang1.wav', 'static'),
+    bang2 = love.audio.newSource('bang2.wav', 'static'),
     win = love.audio.newSource('win.wav', 'static'),
     pop = love.audio.newSource('pop.wav', 'static'),
   }
@@ -60,12 +68,12 @@ function love.load()
   
   -- love.math.setRandomSeed(1)
   theGame = {}
-  switchGameStateTo('play')
+  switchGameStateTo('config')
 end
 
   
 function love.keypressed(key, scancode)
-  if CHEATS and key == "r" then
+  if CHEATS and key == 'r' then
     love.load()
   elseif CHEATS and key == "f5" then
     -- Quick reload for development
@@ -73,34 +81,47 @@ function love.keypressed(key, scancode)
   elseif CHEATS and key == "escape" then
     -- Quick quit for development
     love.event.quit()
-  --[[
-  elseif key == 'space' then
-    if not Queue.isEmpty(theGame.showQueue) then
-      stepShowQueue(theGame.field, theGame.showQueue)
-    end
-  --]]
   end
 end
 
 
 function love.mousepressed(x, y, button)
-  if theGame.state == 'play' then
-    thePressedTileCol, thePressedTileRow = screenToTile(x, y)
+  if (theGame.state == 'play') or (theGame.state == 'ready') then
+    theGame.pressedTileCol, theGame.pressedTileRow = screenToTile(x, y)
+  elseif theGame.state == 'config' then
+    -- Process button presses
+    processWidgetClick(theGame.widgetBombs, x, y)
+    processWidgetClick(theGame.widgetRows, x, y)
+    processWidgetClick(theGame.widgetCols, x, y)
+    if isPointInsideRect(x, y, theGame.okButton.x, theGame.okButton.y, 32, 32) then
+      sounds.click:play()
+      switchGameStateTo('ready')
+    end
+  elseif theGame.state == 'win' then
+    if isPointInsideRect(x, y, theGame.retryMenu.x, theGame.retryMenu.y, 32, 32) then
+      sounds.click:play()
+      switchGameStateTo('config')
+    end
+  elseif theGame.state == 'lose' then
+    if isPointInsideRect(x, y, theGame.retryMenu.x, theGame.retryMenu.y, 32, 32) then
+      sounds.click:play()
+      switchGameStateTo('config')
+    end
   end
 end
 
 
 function love.mousereleased(x, y, button)
-  if theGame.state == 'play' then
-    if gameOver or gameWin then return end
-    
+  if (theGame.state == 'play') or (theGame.state == 'ready') then
+    -- Playing, so try to click on a tile (if it was the one the mouse originally pressed down on)
     local col, row = screenToTile(x, y)
-    if isOnField(row, col, theGame.field) and col == thePressedTileCol and row == thePressedTileRow then
+    if isOnField(row, col, theGame.field) and (col == theGame.pressedTileCol) and (row == theGame.pressedTileRow) then
       if button == 1 then
         -- Reveal
-        shouldCheckWin = true
-        if not gameStarted then
-          startGame(theGame.configBombCount, row, col)
+        theGame.shouldCheckWin = true
+        if (theGame.state == 'ready') then
+          switchGameStateTo('play')
+          addBombsExcept(theGame.field, theGame.configBombCount, row, col)
         end
         if not getFlag(theGame.field, row, col) then
           Queue.put(theGame.showQueue, {row, col})
@@ -111,7 +132,7 @@ function love.mousereleased(x, y, button)
       elseif not theGame.field.revealed[{row,col}] then
         -- Flag
         toggleFlag(theGame.field, row, col)
-        shouldCheckWin = true
+        theGame.shouldCheckWin = true
       end
     end
   end
@@ -121,45 +142,92 @@ end
 function love.update(dt)
   if theGame.state == 'config' then
     -- Setting up game
+    widgetUpdate(theGame.widgetBombs)
+    widgetUpdate(theGame.widgetRows)
+    widgetUpdate(theGame.widgetCols)
   elseif theGame.state == 'play' then
     -- Playing game
-    if gameStarted then
-      processTheShowQueue(20 + math.floor(1000 * dt))
-      
-      if not gameOver and checkWin() then
-        setGameWin()
-      end
+    processTheShowQueue(20 + math.floor(1000 * dt))
+    if checkWin() then
+      setGameWin()
     end
-    
-    if gameWin then
-      local now = love.timer.getTime()
-      if now - lastBlinkTime > 0.5 then
-        lastBlinkTime = now
-        showFlags = not showFlags
-      end
-    end
+  elseif theGame.state == 'win' then
+    updateBlinkingFlags()
+    updateMenuVisibility()
+  elseif theGame.state == 'lose' then
+    updateBlinkingFlags()
+    updateBombShowing()
+    updateMenuVisibility()
   end
 end
 
 
 function love.draw()
-  love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
-  
-  drawBorder()
-  
-  if theGame.state == 'play' then
+  if theGame.state == 'config' then
+    -- Config state
+    love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+    local x1, y1 = getCenterField(theGame.configRows, theGame.configCols)
+    local w, h = theGame.configCols * theFieldTileSize, theGame.configRows * theFieldTileSize
+    
+    love.graphics.setColor(1,1,1)
+    drawField({rows = theGame.configRows, cols = theGame.configCols}, x1, y1, true)
+    
+    love.graphics.setColor(0.8,0.8,0.8)
+    local cx, cy = love.graphics.getWidth()/2 - 80, love.graphics.getHeight()/2 - 80
+    local cw, ch = 180, 200
+    love.graphics.rectangle('fill', cx, cy, cw, ch)
+    love.graphics.setColor(0,0,0)
+    love.graphics.rectangle('line', cx, cy, cw, ch)
+    
+    love.graphics.setColor(1,1,1)
+    drawWidget(theGame.widgetBombs)
+    drawWidget(theGame.widgetRows)
+    drawWidget(theGame.widgetCols)
+    
+    updateOkButton()
+    local mouseX, mouseY = love.mouse.getPosition()
+    if isPointInsideRect(mouseX, mouseY, theGame.okButton.x, theGame.okButton.y, 32, 32) then
+      love.graphics.setColor(1, 1, 1)
+    else
+      love.graphics.setColor(0.8, 0.8, 0.8)
+    end
+    love.graphics.draw(sheet, tiles.check, theGame.okButton.x, theGame.okButton.y)
+    love.graphics.setColor(1,1,1)
+    
+  elseif theGame.state == 'ready' then
+    -- Ready state
+    love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+    drawBorder()
     drawField(theGame.field)
+    drawInfo(0)
+    
+  elseif theGame.state == 'play' then
+    love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+    drawBorder()
+    drawField(theGame.field)
+    drawInfo(getPlayTime())
+    
   elseif theGame.state == 'lose' then
+    love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+    drawBorder()
     drawField(theGame.field)
-    love.graphics.setColor(1,1,1)
-    love.graphics.print("GAME OVER", 120, 20)
+    drawInfo(getPlayTime())
+    if theGame.showMenu then
+      drawRetryMenu()
+    end
+    
   elseif theGame.state == 'win' then
+    love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+    drawBorder()
     drawField(theGame.field)
-    love.graphics.setColor(1,1,1)
-    love.graphics.print("YOU WIN", 120, 20)
+    drawInfo(getPlayTime())
+    if theGame.showMenu then
+      drawRetryMenu()
+    end
+    
   end
   
-  drawInfo()
+  --love.graphics.print(theGame.state, 10, 10)
 end
 
 
@@ -170,8 +238,16 @@ function switchGameStateTo(newState)
   
   -- Note: do not add early returns to this code because the state variable
   -- is changed at the end.
-  if (not theGame.state) and (newState == 'play') then
-    -- Start in the play state
+  if (not theGame.state) and (newState == 'config') then
+    -- Start in config
+    theGame.configRows = 10
+    theGame.configCols = 10
+    theGame.configBombCount = 15
+    addConfigWidgets(theGame)
+    theGame.okButton = {}
+    updateOkButton()
+  elseif (not theGame.state) and (newState == 'ready') then
+    -- Start in ready
     theGame.configRows = 10
     theGame.configCols = 10
     theGame.configBombCount = 30
@@ -183,25 +259,53 @@ function switchGameStateTo(newState)
     theGame.pressedTileRow = 0
     theGame.field = makeBlankField(theGame.configRows, theGame.configCols)
     theGame.fieldX, theGame.fieldY = getCenterField()
-    theGame.startTime = love.timer.getTime()
     theGame.flagCount = 0
+    theGame.endTime = nil
+  elseif (theGame.state == 'config') and (newState == 'ready') then
+    -- Start in ready
+    assert(theGame.configRows)
+    assert(theGame.configCols)
+    assert(theGame.configBombCount)
+    theGame.showQueue = Queue.new()
+    theGame.shouldCheckWin = false
+    theGame.showFlags = true
+    theGame.lastBlinkTime = 0
+    theGame.pressedTileCol = 0
+    theGame.pressedTileRow = 0
+    theGame.field = makeBlankField(theGame.configRows, theGame.configCols)
+    theGame.fieldX, theGame.fieldY = getCenterField()
+    theGame.flagCount = 0
+    theGame.endTime = nil
+  elseif (theGame.state == 'ready') and (newState == 'play') then
+    -- Ready --> Play
+    theGame.startTime = love.timer.getTime()
+    theGame.endTime = nil
   elseif (theGame.state == 'play') and (newState == 'lose') then
     -- Play --> lose
-    gameOver = true
-    endTime = love.timer.getTime()
-    showAllBombs(theGame.field)
+    theGame.endTime = love.timer.getTime()
     sounds.click:stop()
     sounds.bang:play()
+    theGame.showMenu = false
+    addRetryMenu(theGame)
   elseif (theGame.state == 'play') and (newState == 'win') then
     -- Play --> win
-    gameWin = true
-    endTime = love.timer.getTime()
+    theGame.endTime = love.timer.getTime()
     showAllBombs(theGame.field)
     sounds.click:stop()
     sounds.win:play()
+    theGame.showMenu = false
+    addRetryMenu(theGame)
+  elseif (theGame.state == 'lose') and (newState == 'config') then
+    -- Lose --> config
+    theGame.endTime = nil
+    theGame.lastBombTime = nil
+    theGame.isShowingBombs = nil
+  elseif (theGame.state == 'win') and (newState == 'config') then
+    -- Win --> config
+    theGame.endTime = nil
   else
     -- Invalid transition
-    error("switchGameStateTo: invalid transition from state "..theGame.state.." to "..newState)
+    error("switchGameStateTo: invalid transition from state "..tostring(theGame.state).." to "..tostring(newState))
   end
   
   -- Now finally switch the state value
@@ -209,10 +313,151 @@ function switchGameStateTo(newState)
 end
 
 
-function drawInfo()
+function updateBlinkingFlags()
+  local now = love.timer.getTime()
+  if now - theGame.lastBlinkTime > 0.5 then
+    theGame.lastBlinkTime = now
+    theGame.showFlags = not theGame.showFlags
+  end
+end
+
+
+function updateOkButton()
+  local cx, cy = love.graphics.getWidth()/2, love.graphics.getHeight()/2
+  theGame.okButton.x = cx - 4
+  theGame.okButton.y = cy + 75
+end
+
+
+function processWidgetClick(w, x, y)
+  if isPointInsideRect(x, y, widgetGetBounds(w, '-')) then
+    w.callback('-')
+  elseif isPointInsideRect(x, y, widgetGetBounds(w, '+')) then
+    w.callback('+')
+  end
+end
+
+
+function isPointInsideRect(px, py, rx, ry, rw, rh)
+  return rx <= px and px <= rx + rw and ry <= py and py <= ry + rh
+end
+
+
+function addConfigWidgets(t)
+  t.widgetBombs = {
+    quad = 'mine',
+    index = 1,
+    callback = function (direction)
+        if direction == '+' then theGame.configBombCount = theGame.configBombCount + 1
+        elseif direction == '-' then theGame.configBombCount = theGame.configBombCount - 1 end
+        gameClampBombs(theGame)
+        return theGame.configBombCount
+      end
+  }
+  widgetUpdate(t.widgetBombs)
+  
+  t.widgetRows = {
+    quad = 'row',
+    index = 2,
+    callback = function (direction)
+        if direction == '+' then theGame.configRows = theGame.configRows + 1
+        elseif direction == '-' then theGame.configRows = theGame.configRows - 1 end
+        theGame.configRows = clamp(theGame.configRows, MIN_ROWS, MAX_ROWS)
+        gameClampBombs(theGame)
+        return theGame.configRows
+      end
+  }
+  widgetUpdate(t.widgetRows)
+  
+  t.widgetCols = {
+    quad = 'col',
+    index = 3,
+    callback = function (direction)
+        if direction == '+' then theGame.configCols = theGame.configCols + 1
+        elseif direction == '-' then theGame.configCols = theGame.configCols - 1 end
+        theGame.configCols = clamp(theGame.configCols, MIN_COLS, MAX_COLS)
+        gameClampBombs(theGame)
+        return theGame.configCols
+      end
+  }
+  widgetUpdate(t.widgetCols)
+end
+
+
+function widgetUpdate(w)
+  local cx, cy = love.graphics.getWidth()/2, love.graphics.getHeight()/2
+  w.x = cx - 32 * 2
+  w.y = cy - 96 + (40 * w.index)
+end
+
+
+function gameClampBombs(game)
+  local rows, cols = game.configRows, game.configCols
+  local maxBombs = (rows * cols * 2) / 3
+  game.configBombCount = clamp(game.configBombCount, MIN_BOMBS, maxBombs)
+end
+
+
+-- Get (x,y,w,h) bounds for a specified button ('+' or '-') for a widget with an origin at (x1, y1)
+function widgetGetBounds(w, button)
+  if button == '+' then
+    return 6 + 16 + w.x + 32 * 3, w.y, 32, 32
+  elseif button == '-' then
+    return 6+ w.x + 32 * 1, w.y, 32, 32
+  end
+end
+
+
+function drawWidget(widget)
+  local x1, y2 = widget.x, widget.y
+  
+  local value = widget.callback()
+  
+  drawTile(widget.quad, x1, y2)
+  
+  local mouseX, mouseY = love.mouse.getPosition()
+  local x, y, w, h
+  
+  x, y, w, h = widgetGetBounds(widget, '-')
+  if isPointInsideRect(mouseX, mouseY, x, y, w, h) then
+    love.graphics.setColor(0.6,0.6,0.6)
+  else
+    love.graphics.setColor(0.4,0.4,0.4)
+  end
+  love.graphics.rectangle('fill', x, y, w, h)
+  love.graphics.setColor(1,1,1)
+  drawTile('-', x + 8, y + 9)
+
+  x, y, w, h = widgetGetBounds(widget, '+')
+  if isPointInsideRect(mouseX, mouseY, x, y, w, h) then
+    love.graphics.setColor(0.6,0.6,0.6)
+  else
+    love.graphics.setColor(0.4,0.4,0.4)
+  end
+  love.graphics.rectangle('fill', x, y, w, h)
+  
+  love.graphics.setColor(1,1,1)
+  drawTile('+', x + 8, y + 9)
+  
+  local b0 = math.floor(value / 100)
+  value = math.floor(value - (100 * b0))
+  local b1 = math.floor(value / 10)
+  value = math.floor(value - (10 * b1))
+  local b2 = value
+  local x2 = x1 + 10 + 32 * 2
+  local y3 = y2 + 6
+  if b0 > 0 then drawDigit(b0, x2 + 12 * 0, y3) end
+  if b0 > 0 or b1 > 0 then drawDigit(b1, x2 + 12 * 1, y3) end
+  drawDigit(b2, x2 + 12 * 2, y3)
+end
+
+
+function drawInfo(time)
+  assert(type(time) == 'number')
+  
   local x1, y1 = getCenterField()
   y1 = y1 - 2 * theFieldTileSize
-  drawTimeBox(x1 - theFieldTileSize + 1, y1, getPlayTime())
+  drawTimeBox(x1 - theFieldTileSize + 1, y1, time)
   local x2 = theGame.fieldX + theFieldTileSize * theGame.field.cols - 30
   drawBombCount(theGame.configBombCount, x2, y1)
   local x3 = x2 - 96
@@ -221,30 +466,36 @@ end
 
 
 function getPlayTime()
-  if gameStarted then
-    if theGame.state == 'lose' or theGame.state == 'win' then
-      return endTime - startTime
-    else
-      return math.floor(love.timer.getTime() - startTime)
-    end
-  else
-    return 0
-  end
+  local lastTime = theGame.endTime or love.timer.getTime()
+  return lastTime - theGame.startTime
 end
 
 
 function drawTimeBox(x, y, seconds)
-  --love.graphics.draw(sheet, tiles.panel, x, y)
-  --love.graphics.draw(sheet, tiles.panel, x+30, y)
   drawTime(x+4, y+8, seconds)
+end
+
+
+function secondsToHMS(seconds)
+  local h = math.floor(seconds / 3600)
+  seconds = math.floor(seconds - h * 3600)
+  assert(seconds < 3600)
+  local m = math.floor(seconds / 60)
+  seconds = math.floor(seconds - m * 60)
+  assert(0 <= m and m <= 59)
+  local s = seconds
+  assert(0 <= s and s <= 59)
+  return h, m, s
 end
 
 
 function drawTime(x, y, seconds)
   assert(seconds >= 0)
   
-  local m = math.floor(seconds / 60)
-  local s = seconds - m*60
+  local h, m, s = secondsToHMS(seconds)
+  
+  local h1 = math.floor(h / 10)
+  local h2 = math.floor(h % 10)
   
   local m1 = math.floor(m / 10)
   local m2 = math.floor(m % 10)
@@ -252,11 +503,14 @@ function drawTime(x, y, seconds)
   local s1 = math.floor(s / 10)
   local s2 = math.floor(s % 10)
   
-  drawDigit(m1, x, y)
-  drawDigit(m2, x+12, y)
+  drawDigit(h1, x, y)
+  drawDigit(h2, x+12, y)
   drawDigit(':', x+24, y)
-  drawDigit(s1, x+31, y)
-  drawDigit(s2, x+44, y)
+  drawDigit(m1, x+32, y)
+  drawDigit(m2, x+44, y)
+  drawDigit(':', x+56, y)
+  drawDigit(s1, x+65, y)
+  drawDigit(s2, x+77, y)
 end
 
 
@@ -296,29 +550,34 @@ end
 
 
 function drawDigit(digit, x, y)
+  assert(digit == ':' or member(digit, {0,1,2,3,4,5,6,7,8,9}))
   local quad = digits[digit]
+  assert(quad, "cannot draw digit "..digit)
   love.graphics.draw(sheet, quad, x, y)
 end
 
 
-function drawBorder()
+function drawBorder(rows, cols)
+  local rows = rows or theGame.field.rows
+  local cols = cols or theGame.field.cols
+  
   local x, y
 
-  for r = 0, theGame.field.rows + 1 do
+  for r = 0, rows + 1 do
     x, y = tileToScreen(0, r)
     love.graphics.draw(sheet, tiles.border, x, y)
     x, y = tileToScreen(theGame.field.cols + 1, r)
     love.graphics.draw(sheet, tiles.border, x, y)
   end
   
-  for c = 1, theGame.field.cols do
+  for c = 1, cols do
     x, y = tileToScreen(c, 0)
     love.graphics.draw(sheet, tiles.border, x, y)
     x, y = tileToScreen(c, theGame.field.rows + 1)
     love.graphics.draw(sheet, tiles.border, x, y)
   end
   
-  for c = 0, theGame.field.cols + 1 do
+  for c = 0, cols + 1 do
     x, y = tileToScreen(c, -1)
     love.graphics.draw(sheet, tiles.panel, x, y)
   end
@@ -326,13 +585,12 @@ end
 
 
 function checkWin()
-  if shouldCheckWin then
-    shouldCheckWin = false
-    if not gameOver and isGameWon() then
-      return true
-    end
+  if not theGame.shouldCheckWin then
+    return false
   end
-  return false
+  
+  theGame.shouldCheckWin = false
+  return isGameWon()
 end
 
 
@@ -352,26 +610,22 @@ end
 
 
 function toggleFlag(aField, row, col)
+  sounds.pop:play()
   local val = aField.flags[{row,col}]
   if not val then
+    -- No flag --> flag #2
     theGame.flagCount = theGame.flagCount + 1
-    sounds.pop:play()
     aField.flags[{row,col}] = 2
   elseif val == 2 then
-    sounds.pop:play()
+    -- Flag #2 --> flag #1
     aField.flags[{row,col}] = 1
   elseif val == 1 then
+    -- Flag #1 --> no flag
     theGame.flagCount = theGame.flagCount - 1
-    sounds.pop:play()
     aField.flags[{row,col}] = nil
+  else
+    error("unexpected flag value: "..tostring(val))
   end
-end
-
-
-function popList(t)
-  local val = t[#t]
-  t[#t] = nil
-  return val
 end
 
 
@@ -416,8 +670,8 @@ end
 
 
 function showAllBombs(aField)
-  for pos, v in pairs(aField.bombs) do
-      showTile(aField, pos)
+  for k, v in pairs(aField.bombs) do
+      showTile(aField, unpack(k))
   end
 end
 
@@ -431,13 +685,6 @@ end
 
 function setGameWin()
   switchGameStateTo('win')
-end
-
-
-function startGame(bombCount, safeRow, safeCol)
-  gameStarted = true
-  addBombsExcept(theGame.field, bombCount, safeRow, safeCol)
-  startTime = love.timer.getTime()
 end
 
 
@@ -494,10 +741,10 @@ end
 
 function makeBlankField(rows, cols)
   return {
-    bombs = Sparse2D.new{},    -- bomb/mine locations
-    revealed = Sparse2D.new{}, -- shown spots
-    numbers = Sparse2D.new{},  -- locations to show the number of nearby bombs
-    flags = Sparse2D.new{},    -- flagged/marked tiles
+    bombs = Sparse2D.new(),    -- bomb/mine locations
+    revealed = Sparse2D.new(), -- shown spots
+    numbers = Sparse2D.new(),  -- locations to show the number of nearby bombs
+    flags = Sparse2D.new(),    -- flagged/marked tiles
     rows = rows,
     cols = cols,
   }
@@ -518,14 +765,25 @@ function tileToScreen(tx, ty)
 end
 
 
-function drawField(aField)
+function drawField(aField, fieldX, fieldY, isFake)
+  local fieldX = fieldX or theGame.fieldX
+  local fieldY = fieldY or theGame.fieldY
   for r = 1, aField.rows do
-    local y = theGame.fieldY + (r - 1) * theFieldTileSize
+    local y = fieldY + (r - 1) * theFieldTileSize
     for c = 1, aField.cols do
-      local x = theGame.fieldX + (c - 1) * theFieldTileSize
-      drawFieldTile(aField, r, c, x, y)
+      local x = fieldX + (c - 1) * theFieldTileSize
+      if isFake then
+        drawTile('unknown', x, y)
+      else
+        drawFieldTile(aField, r, c, x, y)
+      end
     end
   end
+end
+
+
+function drawTile(t, x, y)
+  love.graphics.draw(sheet, tiles[t], x, y)
 end
 
 
@@ -535,7 +793,7 @@ function drawFieldTile(aField, r, c, x, y)
   if aField.revealed[coord] then
     -- Revealed tile
     --Choose background
-    if aField.fatalRow == r and aField.fatalCol == c then
+    if (aField.fatalRow == r) and (aField.fatalCol == c) then
       love.graphics.draw(sheet, tiles.fatal, x, y)
     else
       love.graphics.draw(sheet, tiles.known, x, y)
@@ -547,16 +805,17 @@ function drawFieldTile(aField, r, c, x, y)
     else
       local n = aField.numbers[coord]
       if n then
-        love.graphics.draw(sheet, tiles[tostring(n)], x, y)
+        drawTile(tostring(n), x, y)
       end
     end
     
   else
     -- Unrevealed tile
-    love.graphics.draw(sheet, tiles.unknown, x, y)
+    drawTile('unknown', x, y)
   end
   
-  if showFlags then
+  -- Maybe draw flag on top
+  if theGame.showFlags then
     local flagVal = aField.flags[coord]
     if flagVal then
       love.graphics.draw(sheet, getFlagQuad(flagVal), x, y)
@@ -565,9 +824,11 @@ function drawFieldTile(aField, r, c, x, y)
 end
 
 
-function getCenterField()
-  local x = (love.graphics.getWidth()  / 2) - (theGame.field.cols * theFieldTileSize)/2
-  local y = (love.graphics.getHeight() / 2) - (theGame.field.rows * theFieldTileSize)/2
+function getCenterField(numRows, numCols)
+  local numRows = numRows or theGame.field.rows
+  local numCols = numCols or theGame.field.cols
+  local x = (love.graphics.getWidth()  / 2) - (numCols * theFieldTileSize)/2
+  local y = (love.graphics.getHeight() / 2) - (numRows * theFieldTileSize)/2
   return x, y
 end
 
@@ -628,4 +889,69 @@ function isGameWon()
   
   --offendingType = nil
   return true
+end
+
+
+function updateMenuVisibility()
+  local now = love.timer.getTime()
+  if (now - theGame.endTime >= MENU_WAIT_SECONDS) and not theGame.isShowingBombs then
+    theGame.showMenu = true
+  end
+end
+
+
+function drawRetryMenu()
+  local x, y = theGame.retryMenu.x, theGame.retryMenu.y
+  local mouseX, mouseY = love.mouse.getPosition()
+    if isPointInsideRect(mouseX, mouseY, x, y, 32, 32) then
+      love.graphics.setColor(1, 1, 1)
+    else
+      love.graphics.setColor(0.8, 0.8, 0.8)
+    end
+    love.graphics.draw(sheet, tiles.check, x, y)
+    love.graphics.setColor(1,1,1)
+end
+
+
+function addRetryMenu(t)
+  t.retryMenu = {
+    x = love.graphics.getWidth()/2 - 16,
+    y = love.graphics.getHeight()/2 - 16,
+  }
+end
+
+
+function updateBombShowing()  
+  local now = love.timer.getTime()
+  
+  if not theGame.lastBombTime then
+    theGame.lastBombTime = now
+    theGame.bombDelay = 0.5
+    theGame.isShowingBombs = true
+    return
+  end
+  
+  if not theGame.isShowingBombs then
+    return
+  end
+  
+  if now - theGame.lastBombTime > theGame.bombDelay then
+    theGame.lastBombTime = now
+    if theGame.bombDelay > 0.2 then
+      theGame.bombDelay = theGame.bombDelay * 0.90
+    end
+    
+    -- reveal one bomb
+    for k, v in pairs(theGame.field.bombs) do
+      if not theGame.field.revealed[k] then
+        sounds.bang2:stop()
+        sounds.bang2:play()
+        showTile(theGame.field, unpack(k))
+        return
+      end
+    end
+    
+    -- if this point is reached, then all bombs are shown
+    theGame.isShowingBombs = false
+  end
 end

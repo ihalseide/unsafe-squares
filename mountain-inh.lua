@@ -232,8 +232,24 @@ Sparse2D.mt.__index = function(table, key)
       end
     end
     return nil
-  end    
+  end
   return rawget(table, key)
+end
+
+
+Sparse2D.mt.__newindex = function(table, key, val)
+	if type(key) == 'table' then
+    if #key == 2 then
+      local a, b = unpack(key)
+      for k, v in pairs(table) do
+        if k[1] == a and k[2] == b then
+          rawset(table, k, val)
+          return
+        end
+      end
+    end
+  end
+  return rawset(table, key, val)
 end
 
 
