@@ -8,7 +8,7 @@ require "mountain-inh"
 
 CHEATS = true
 theFieldTileSize = 32
-GAME_STATES = { 'config', 'ready', 'play', 'lose', 'win' }
+GAME_STATES = { 'menu', 'config', 'ready', 'play', 'lose', 'win' }
 MIN_ROWS, MIN_COLS = 9, 9
 MAX_ROWS, MAX_COLS = 15, 23
 MIN_BOMBS = 2
@@ -49,13 +49,14 @@ function love.load()
     [4] = love.graphics.newQuad(45, 128, 13, 17, sheet),
     [5] = love.graphics.newQuad(58, 128, 13, 17, sheet),
     [6] = love.graphics.newQuad(71, 128, 12, 17, sheet),
-    [7] = love.graphics.newQuad(83, 128, 12, 16, sheet),
-    [8] = love.graphics.newQuad(95, 128, 13, 16, sheet),
+    [7] = love.graphics.newQuad(83, 128, 12, 17, sheet),
+    [8] = love.graphics.newQuad(95, 128, 13, 17, sheet),
     [9] = love.graphics.newQuad(108, 128, 11, 18, sheet),
     [':'] = love.graphics.newQuad(120, 128, 6, 16, sheet),
   }
   
   -- Load sounds
+  music = love.audio.newSource("awesomeness.wav", "stream")
   sounds = {
     click = love.audio.newSource('click.wav', 'static'),
     bang = love.audio.newSource('bang1.wav', 'static'),
@@ -66,9 +67,11 @@ function love.load()
   sounds.bang:setVolume(0.4)
   sounds.pop:setVolume(0.5)
   
+  font1 = love.graphics.newFont(18)
+  
   -- love.math.setRandomSeed(1)
   theGame = {}
-  switchGameStateTo('config')
+  switchGameStateTo('menu')
 end
 
   
@@ -107,6 +110,8 @@ function love.mousepressed(x, y, button)
       sounds.click:play()
       switchGameStateTo('config')
     end
+  elseif theGame.state == 'menu' then
+    switchGameStateTo('config')
   end
 end
 
@@ -158,12 +163,24 @@ function love.update(dt)
     updateBlinkingFlags()
     updateBombShowing()
     updateMenuVisibility()
+  elseif theGame.state == 'menu' then
+    theGame.menuParticles:update(dt)
+    if theGame.playMusic then
+      if not music:isPlaying() then
+        music:play()
+      end
+    end
   end
 end
 
 
 function love.draw()
-  if theGame.state == 'config' then
+  if theGame.state == 'menu' then
+    -- Menu state
+    love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
+    love.graphics.draw(theGame.menuParticles)
+    drawActionMenu()
+  elseif theGame.state == 'config' then
     -- Config state
     love.graphics.setBackgroundColor(0.2, 0.2, 0.5)
     local x1, y1 = getCenterField(theGame.configRows, theGame.configCols)
@@ -236,16 +253,41 @@ function switchGameStateTo(newState)
     error("switchGameStateTo: invalid new state: "..newState)
   end
   
+  -- Always reset the actions list
+  theGame.actions = {}
+  
   -- Note: do not add early returns to this code because the state variable
   -- is changed at the end.
-  if (not theGame.state) and (newState == 'config') then
-    -- Start in config
+  if (theGame.state == 'menu') and (newState == 'config') then
+    -- Menu --> config
+    music:stop()
     theGame.configRows = 10
     theGame.configCols = 10
     theGame.configBombCount = 15
     addConfigWidgets(theGame)
     theGame.okButton = {}
     updateOkButton()
+    addAction(theGame,
+      newAction {
+        text='Toggle music',
+        key='m',
+        callback=function ()
+            theGame.playMusic = not theGame.playMusic
+          end
+      })
+  elseif newState == 'menu' then
+    -- ? --> menu
+    if theGame.state == nil then 
+      theGame.playMusic = true
+    end
+    theGame.menuParticles = love.graphics.newParticleSystem(sheet, 50)
+    theGame.menuParticles:setPosition(love.graphics.getWidth()/2, -10)
+    theGame.menuParticles:setQuads(tiles.mine)
+    theGame.menuParticles:setParticleLifetime(6, 6)
+    theGame.menuParticles:setEmissionRate(7)
+    theGame.menuParticles:setSizeVariation(1)
+    theGame.menuParticles:setLinearAcceleration(0, 40, 0, 45)
+    theGame.menuParticles:setEmissionArea('uniform', -32+love.graphics.getWidth()/2, 0)
   elseif (not theGame.state) and (newState == 'ready') then
     -- Start in ready
     theGame.configRows = 10
@@ -262,7 +304,7 @@ function switchGameStateTo(newState)
     theGame.flagCount = 0
     theGame.endTime = nil
   elseif (theGame.state == 'config') and (newState == 'ready') then
-    -- Start in ready
+    -- Config --> ready
     assert(theGame.configRows)
     assert(theGame.configCols)
     assert(theGame.configBombCount)
@@ -310,6 +352,12 @@ function switchGameStateTo(newState)
   
   -- Now finally switch the state value
   theGame.state = newState
+end
+
+
+function drawActionMenu()
+  love.graphics.setColor(1,1,1)
+  
 end
 
 
