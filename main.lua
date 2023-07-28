@@ -13,6 +13,7 @@ MENU_WAIT_SECONDS = 3
 TITLE_COPYRIGHT = 'Copyright 2023 DivZero'
 
 function love.load()
+  love.window.setTitle('Unsafe Squares')
   love.graphics.setDefaultFilter('nearest','nearest')
   sheet = love.graphics.newImage('sheet.png')
   tiles = {
@@ -52,15 +53,15 @@ function love.load()
     [':'] = love.graphics.newQuad(120, 128, 6, 16, sheet),
   }
   sounds = {
-    click = love.audio.newSource('click.wav', 'static'),
-    bang = love.audio.newSource('bang1.wav', 'static'),
-    bang2 = love.audio.newSource('bang2.wav', 'static'),
-    win = love.audio.newSource('win.wav', 'static'),
-    pop = love.audio.newSource('pop.wav', 'static'),
-    accept = love.audio.newSource('accept.mp3', 'static'),
-    selection = love.audio.newSource('selection.wav', 'static'),
-    reject = love.audio.newSource('reject.wav', 'static'),
-    info = love.audio.newSource('info.wav', 'static'),
+    click = requireAudio('click.wav', 'static'),
+    bang = requireAudio('bang1.wav', 'static'),
+    bang2 = requireAudio('bang2.wav', 'static'),
+    win = requireAudio('win.wav', 'static'),
+    pop = requireAudio('pop.wav', 'static'),
+    accept = requireAudio('accept.mp3', 'static'),
+    selection = requireAudio('selection.wav', 'static'),
+    reject = requireAudio('reject.wav', 'static'),
+    info = requireAudio('info.wav', 'static'),
   }
   sounds.bang:setVolume(0.4)
   sounds.pop:setVolume(0.5)
@@ -96,11 +97,7 @@ button again or by pressing [H].]],
     y = 40,
     width = 300,
     height = 400,
-    bodyText =
-[[
-Programming
-  Izak Halseide
-INCOMPLETE]],
+    bodyText = love.filesystem.read('credits.txt'),
   }
   switchGameStateTo('menu')
 end
@@ -179,7 +176,11 @@ function love.mousereleased(x, y, button)
   end
 end
 
-function love.update(dt)
+function love.draw()
+  update(love.timer.getDelta())
+end
+
+function update(dt)
   if theGame.state == 'play' then
     local nSteps = 20 + math.floor(1000 * dt)
     processTheShowQueue(nSteps)
@@ -191,9 +192,7 @@ function love.update(dt)
     updateBlinkingFlags()
     updateBombShowing()
   end
-end
-
-function love.draw()
+  
   if theGame.state == 'menu' then
     -- Menu state
     love.graphics.setBackgroundColor(1,1,1)
@@ -590,6 +589,7 @@ function setGameOver(fatalRow, fatalCol)
   theGame.field.fatalRow = fatalRow
   theGame.field.fatalCol = fatalCol
   theGame.isWin = false
+  theGame.lastBombTime = nil
   switchGameStateTo('done')
 end
 
@@ -913,4 +913,10 @@ function drawOverlays()
       end
     end
   end
+end
+
+function requireAudio(name, kind)
+  local result = love.audio.newSource('audio/'..name, kind)
+  assert(result)
+  return result
 end
