@@ -2,6 +2,7 @@
 -- Last updated 6:06 PM 7/13/2023
 
 
+-- Count the number of items in a table
 function keyCount(table)
   local n = 0
   for _, _ in pairs(table) do
@@ -11,7 +12,7 @@ function keyCount(table)
 end
 
 
--- Return the number "x" clamped between the given minimum and maximum values
+-- Return the number "x" clamped between the given minimum and maximum values (inclusive)
 function clamp(x, minX, maxX)
 	if x > maxX then
 		return maxX
@@ -163,7 +164,7 @@ function quote(x, level)
 					t[1 + #t] = "[" .. quote(k, next_level) .. "] = " .. quote(v, next_level)
 				end
 			end
-			return table.concat({"{", table.concat(t, ", "), "}"})
+			return table.concat({"{", table.concat(t, ", "), "}"}) -- (join)
 		end
 	else
 		return tostring(x)
@@ -214,8 +215,8 @@ end
 Sparse2D = {}
 Sparse2D.mt = {}
 
-function Sparse2D.new()
-  return setmetatable({}, Sparse2D.mt)
+function Sparse2D.new(t)
+  return setmetatable(t or {}, Sparse2D.mt)
 end
 
 
@@ -254,11 +255,12 @@ end
 
 
 -- Check if a table contains a value as a member.
-function member(item, table)
-  for _, val in pairs(table) do
-    if item == val then
-      return true
-    end
+function member(item, aTable)
+  if not type(aTable) == 'table' then
+    error('member: arg #2 should be table', 2)
+  end
+  for _, val in pairs(aTable) do
+    if item == val then return true end
   end
   return false
 end
