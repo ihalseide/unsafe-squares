@@ -1,4 +1,10 @@
-Credits
-Some of the sound effects in this project were created by David McKee (ViRiX) soundcloud.com/virix
-"Tada" comes from Windows
-Uncredited sounds were from artists who asked not to be credited
+Sound Effects
+  * David McKee (ViRiX)
+    soundcloud.com/virix
+  * "Tada" comes from Windows 10 files
+  * Uncredited sounds were from artists
+    who asked not to be credited
+	
+Programming
+  * Game - Izak Halseide
+  * Engine - LÖVE
